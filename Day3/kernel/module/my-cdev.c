@@ -11,11 +11,35 @@
 #include <linux/cdev.h>
 #include <linux/io.h>
 #include <linux/string.h>
+#include <linux/slag.h>
 #include <asm/uaccess.h>
+
+typedef struct TQueue
+{
+    int r_idx,w_idx;
+    char *buf;
+} TQueue,*PQueue;
+
+static ssize_t q_init(PQueue q, ssize_t count)
+{
+    return count;
+}
+
+static ssize_t q_read(PQueue q, char *value)
+{
+
+    return 0
+}
+
+static ssize_t q_write(PQueue q, char value)
+{
+    
+    return 0
+}
 
 #define BUF_SIZE	8192
 
-static char *bboard_buf;
+static  bboard_buf;
 
 static int bboard_count = 1;
 static size_t	cur_size=0;
