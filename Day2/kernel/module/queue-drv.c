@@ -50,7 +50,7 @@ static int q_read(PQueue q, char *value)
 {
     char v;
     if (q->count==0)
-	return -1;
+	return 0;
     v=(q->buf)[q->r_idx++];
     put_user(v,value);
     if (q->r_idx>=q->size)
@@ -87,79 +87,90 @@ static int q_read_block(PQueue q, char *buf, int len)
 
 static ssize_t q_write(PQueue q, char value)
 {
-
+    if (q->count==q->size)
+	return 0;
     q->buf[q->w_idx++]=value;
     if (q->w_idx>=q->size)
 	q->w_idx=0;
     if (q->count<q->size)
         q->count++;
-    return 0;
+    return 1;
 }
 
-
-#define BUF_SIZE	1024
+#define BUF_SIZE	30
 
 
 static int drv_count = 1;
 static TQueue queue;
-static int term_kthread=0,Terminated=0;
 static dev_t drv_dev = MKDEV(208, 1);
 DECLARE_WAIT_QUEUE_HEAD(ev_rw);
 static struct cdev drv_cdev;
 
-static int thread_func(void *q)
-{
-	
-    PQueue AQueue=&queue;
-    int i=0;
-    for(;;i++)
-    {
-	if (term_kthread)
-	{
-	    Terminated=1;
-	    return 1;
-	}
-	q_write(AQueue,(i % 30)+0x30);
-	wake_up_interruptible(&ev_rw);
-#ifdef DEBUG
-	printk("r_idx=%d,w_idx=%d,count=%d,size=%d\n",
-		AQueue->r_idx,
-		AQueue->w_idx,
-		AQueue->count, 
-		AQueue->size);
-#endif
-	msleep(50);
-    }
-    return 0;
-};
 
 static ssize_t
 drv_read(struct file *file, char __user * buf, size_t count, loff_t * ppos)
 {
-	    int rd_count;
-	    if (wait_event_interruptible(ev_rw,queue.count!=0))
-		return -ERESTARTSYS;
+	int i;
+#ifdef	DEBUG
+	printk("[read] -> count:%d, queue.count:%d\n",count,queue.count);
+#endif
+        if (wait_event_interruptible(ev_rw,queue.count!=0))
+	  return -ERESTARTSYS;
+
+	{
 	    if (count>queue.count)
+	    {
 		count=queue.count;
+	    }
+	    q_read_block(&queue,buf,count);
+	}
+#ifdef	DEBUG
+	printk("[read] -> %d bytes read from queue\n",count);
+	printk("[read] -> r_idx:%d w_idx:%d q.count:%d q.size:%d\n",
+		queue.r_idx,
+		queue.w_idx,
+		queue.count,
+		queue.size);
+#endif
+	wake_up_interruptible(&ev_rw);
+	return count;
+}
+static ssize_t
+drv_write(struct file *file, const char __user *buf, size_t count,
+       loff_t *ppos)
+{
+	int i;
+	char v;
+#ifdef	DEBUG
+	printk("[write] -> count:%d, queue.count:%d\n",count,queue.count);
+#endif
+	if (wait_event_interruptible(ev_rw,queue.count<queue.size))
+	    return -ERESTARTSYS;
+
+        if (count>queue.size-queue.count)
+	{
+	    count=queue.size-queue.count;
+	}
+
+	for (i=0;i<count;i++)
+	{
+	    get_user(v,buf+i);
+	    q_write(&queue,v);
+	}
 #ifdef DEBUG
-	    printk("Count=%d\n",count);
-#endif	
-	    if (count==1)
-		rd_count=q_read(&queue,buf);
-	    else
-		rd_count=q_read_block(&queue,buf,count);
-	
-	
-	return rd_count;
+	printk("[write] -> %d bytes written to queue\n",count);
+#endif
+        wake_up_interruptible(&ev_rw);
+	return count;
+
+
 }
 
 static const struct file_operations drv_fops = {
 	.owner = THIS_MODULE,
 	.read = drv_read,
+	.write = drv_write
 };
-
-
-
 
 static int __init drv_init(void)
 {
@@ -171,7 +182,7 @@ static int __init drv_init(void)
 		goto err_exit;
 	}
 
-	if (register_chrdev_region(drv_dev, drv_count, "saw_gen")) {
+	if (register_chrdev_region(drv_dev, drv_count, "pipe_buf")) {
 		err = -ENODEV;
 		goto err_exit_and_free;
 	}
@@ -183,7 +194,6 @@ static int __init drv_init(void)
 		goto err_dev_unregister;
 	}
 
-	kthread_run(thread_func,NULL,"kthread_saw");
 	printk("driver initialized\n");
 	return 0;
 	
@@ -197,8 +207,6 @@ static int __init drv_init(void)
 
 static void __exit drv_exit(void)
 {
-	term_kthread=1;
-	while (!Terminated) msleep(10);
 	q_free(&queue);
 	cdev_del(&drv_cdev);
 	unregister_chrdev_region(drv_dev, drv_count);
@@ -208,5 +216,5 @@ static void __exit drv_exit(void)
 module_init(drv_init);
 module_exit(drv_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Saw waveform generator");
+MODULE_DESCRIPTION("Pipe character driver");
 MODULE_AUTHOR("");

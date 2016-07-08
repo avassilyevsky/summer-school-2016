@@ -1,4 +1,4 @@
-obj-m += my-cdev.o
+obj-m += $(MOD_NAME).o
 KDIR := /home/user/ti-processor-sdk-linux-am335x-evm-02.00.02.11/board-support/linux-4.1.18+gitAUTOINC+bbe8cfc1da-gbbe8cfc
 
 all:
